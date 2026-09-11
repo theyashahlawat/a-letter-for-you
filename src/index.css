@@ -1,0 +1,75 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --bg-night: #10060d;
+    --bg-burgundy: #220817;
+    --bg-plum: #190812;
+    --paper-cream: #faf6ef;
+    --paper-warm: #f5eee2;
+    --paper-edge: #ebdcc9;
+    --ink-deep: #201518;
+    --ink-muted: #5e4f52;
+    --ink-subtle: #89787b;
+    --accent-gold: #d7b578;
+    --accent-rose: #c98893;
+    --accent-dusty: #dfa8a8;
+  }
+
+  body {
+    font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    background-color: var(--bg-night);
+    color: #f7ede2;
+    overflow-x: hidden;
+  }
+
+  h1, h2, h3, .font-serif {
+    font-family: 'Cormorant Garamond', 'Playfair Display', Georgia, serif;
+  }
+
+  .font-display {
+    font-family: 'Playfair Display', 'Cormorant Garamond', Georgia, serif;
+  }
+
+  .font-handwriting {
+    font-family: 'Alex Brush', cursive;
+  }
+}
+
+/* Luxury Paper Texture with subtle grain & warm vignette */
+.paper-texture {
+  background-color: #faf6ef;
+  background-image: 
+    radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.6) 0%, transparent 75%),
+    radial-gradient(circle at 50% 100%, rgba(215, 181, 120, 0.08) 0%, transparent 60%),
+    linear-gradient(to right, rgba(230, 215, 195, 0.15), rgba(255, 255, 255, 0.2) 20%, rgba(255, 255, 255, 0.2) 80%, rgba(230, 215, 195, 0.15));
+  box-shadow: 
+    0 25px 50px -12px rgba(10, 2, 7, 0.45),
+    0 0 0 1px rgba(215, 181, 120, 0.2),
+    inset 0 0 60px rgba(215, 181, 120, 0.06),
+    inset 0 1px 2px rgba(255, 255, 255, 0.8);
+}
+
+/* Subtle Film Grain Overlay */
+.film-grain {
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.035'/%3E%3C/svg%3E");
+}
+
+/* Soft ambient lighting */
+.ambient-glow-burgundy {
+  background: radial-gradient(ellipse 60% 40% at 50% 40%, rgba(130, 24, 60, 0.18) 0%, rgba(40, 10, 25, 0.05) 60%, transparent 100%);
+}
+
+.ambient-glow-gold {
+  background: radial-gradient(circle at 50% 50%, rgba(215, 181, 120, 0.12) 0%, transparent 70%);
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "A Letter For You",
+  "description": "A cinematic, deeply romantic, and intimate digital love letter written from the heart.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
