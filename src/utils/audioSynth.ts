@@ -1,40 +1,71 @@
-// Unified Audio Engine
-// Supports custom MP3 files (e.g. /song.mp3, /music.mp3 in the /public folder or uploaded audio)
-// and automatically falls back to procedural ambient chord synthesis if no custom song is found.
-// Audio uploaded via "Change Music" is permanently saved in browser IndexedDB.
+// Audio Engine - MP3 soundtrack player
+// Supports user-uploaded songs (persisted in IndexedDB) and default public/song.mp3.
+// Procedural synthesizer is completely removed - only real audio files are played.
 
 import { saveAudioToStorage, getAudioFromStorage, clearAudioFromStorage } from './audioStorage';
+
+function getCandidatePaths(): string[] {
+  const metaEnv = (import.meta as unknown as { env?: { BASE_URL?: string } })?.env;
+  const base = metaEnv?.BASE_URL || '/';
+  const cleanBase = base.endsWith('/') ? base.slice(0, -1) : base;
+
+  const rawList = [
+    `${cleanBase}/song.mp3`,
+    '/song.mp3',
+    'song.mp3',
+    `${cleanBase}/music.mp3`,
+    '/music.mp3',
+    'music.mp3',
+  ];
+
+  // Return unique, non-empty candidates
+  return Array.from(new Set(rawList.filter(Boolean)));
+}
 
 class AmbientAudioEngine {
   private audioElement: HTMLAudioElement | null = null;
   private isCustomTrackActive = false;
-  private songVolume = 0.50; // 50% volume so it doesn't overpower reading
+  private songVolume = 0.70; // Fixed 70% volume so it never overpowers reading
   private candidateIndex = 0;
-  private candidateFiles = ['/song.mp3'];
+  private candidateFiles: string[] = [];
   private customSongUrl: string | null = null;
   private userUploadedBlob: string | null = null;
   private savedSongName: string | null = null;
   private isStorageChecked = false;
-
-  private ctx: AudioContext | null = null;
-  private masterGain: GainNode | null = null;
-  private filterNode: BiquadFilterNode | null = null;
   private isPlaying = false;
-  private timerId: number | null = null;
-
-  // Cinematic pentatonic / romantic chord roots in Hz (Db, Fm, Bbm, Ab)
-  private chords = [
-    [138.59, 174.61, 207.65, 277.18, 329.63], // Db major add9
-    [130.81, 164.81, 196.00, 261.63, 392.00], // C minor 7 / Ab maj
-    [116.54, 138.59, 174.61, 233.08, 349.23], // Bb minor 7
-    [103.83, 130.81, 155.56, 207.65, 311.13], // Ab sus2
-  ];
-  private chordIndex = 0;
+  private isMutedByUser = false;
+  private pendingAutoplay = false;
 
   constructor() {
-    if (typeof window !== 'undefined') {
+    this.candidateFiles = getCandidatePaths();
+    if (this.candidateFiles.length > 0) {
       this.customSongUrl = this.candidateFiles[0];
     }
+    this.attachAutoplayUnlockListeners();
+  }
+
+  private attachAutoplayUnlockListeners() {
+    if (typeof window === 'undefined') return;
+
+    const unlock = async () => {
+      if (this.isMutedByUser) return;
+      if (this.pendingAutoplay || !this.isPlaying) {
+        await this.start();
+      } else if (this.audioElement && this.audioElement.paused) {
+        try {
+          await this.audioElement.play();
+          this.isPlaying = true;
+          this.pendingAutoplay = false;
+        } catch {
+          // ignore
+        }
+      }
+    };
+
+    window.addEventListener('click', unlock, { passive: true, once: true });
+    window.addEventListener('touchstart', unlock, { passive: true, once: true });
+    window.addEventListener('pointerdown', unlock, { passive: true, once: true });
+    window.addEventListener('keydown', unlock, { passive: true, once: true });
   }
 
   public async loadSavedAudioFromStorage(): Promise<string | null> {
@@ -61,6 +92,7 @@ class AmbientAudioEngine {
   }
 
   public async setCustomAudioFile(file: File): Promise<string> {
+    this.isMutedByUser = false;
     if (this.userUploadedBlob) {
       URL.revokeObjectURL(this.userUploadedBlob);
     }
@@ -80,13 +112,15 @@ class AmbientAudioEngine {
   }
 
   public async resetToDefault(): Promise<void> {
+    this.isMutedByUser = false;
     if (this.userUploadedBlob) {
       URL.revokeObjectURL(this.userUploadedBlob);
       this.userUploadedBlob = null;
     }
     this.savedSongName = null;
-    this.customSongUrl = this.candidateFiles[0];
+    this.candidateFiles = getCandidatePaths();
     this.candidateIndex = 0;
+    this.customSongUrl = this.candidateFiles[0] || '/song.mp3';
     await clearAudioFromStorage();
     this.stop();
     await this.start();
@@ -105,57 +139,34 @@ class AmbientAudioEngine {
     if (this.audioElement) {
       this.audioElement.volume = this.songVolume;
     }
-    if (this.masterGain && this.ctx) {
-      this.masterGain.gain.setValueAtTime(0.35 * this.songVolume, this.ctx.currentTime);
-    }
   }
 
   public getVolume(): number {
     return this.songVolume;
   }
 
-  private initSynth() {
-    if (this.ctx) return;
-    const AudioContextClass =
-      window.AudioContext ||
-      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    this.ctx = new AudioContextClass();
-
-    this.filterNode = this.ctx.createBiquadFilter();
-    this.filterNode.type = 'lowpass';
-    this.filterNode.frequency.setValueAtTime(650, this.ctx.currentTime);
-    this.filterNode.Q.setValueAtTime(1.2, this.ctx.currentTime);
-
-    this.masterGain = this.ctx.createGain();
-    this.masterGain.gain.setValueAtTime(0.25, this.ctx.currentTime);
-
-    this.filterNode.connect(this.masterGain);
-    this.masterGain.connect(this.ctx.destination);
-  }
-
   public async start(): Promise<boolean> {
-    if (this.isPlaying) return true;
+    if (this.isMutedByUser) return false;
 
-    // Load permanently saved song from storage if not checked yet
+    // Check IndexedDB if not checked yet
     if (!this.isStorageChecked) {
       await this.loadSavedAudioFromStorage();
     }
 
-    // 1. Try playing custom song first (/song.mp3 or uploaded blob)
-    const customSuccess = await this.tryPlayCustomSong();
-    if (customSuccess) {
+    const success = await this.playCurrentCandidate();
+    if (success) {
       this.isPlaying = true;
       this.isCustomTrackActive = true;
+      this.pendingAutoplay = false;
       return true;
     }
 
-    // 2. Fallback to procedural ambient synthesizer
-    return this.startSynth();
+    return false;
   }
 
-  private tryPlayCustomSong(): Promise<boolean> {
+  private playCurrentCandidate(): Promise<boolean> {
     return new Promise((resolve) => {
-      const urlToTry = this.customSongUrl || this.candidateFiles[this.candidateIndex];
+      const urlToTry = this.customSongUrl || this.candidateFiles[this.candidateIndex] || '/song.mp3';
 
       if (this.audioElement) {
         this.audioElement.pause();
@@ -166,25 +177,28 @@ class AmbientAudioEngine {
       const audio = new Audio();
       audio.preload = 'auto';
       audio.loop = true;
-      audio.volume = this.songVolume; // 70% volume so it doesn't interrupt or overpower reading
+      audio.volume = this.songVolume;
 
       let resolved = false;
 
-      const handleFail = () => {
+      const tryNextCandidate = () => {
         if (resolved) return;
         resolved = true;
-        // If user hasn't explicitly uploaded a blob and we still have candidates (/music.mp3)
+        // If it was a default file that 404ed, try next path candidate
         if (!this.userUploadedBlob && this.candidateIndex < this.candidateFiles.length - 1) {
           this.candidateIndex++;
           this.customSongUrl = this.candidateFiles[this.candidateIndex];
-          this.tryPlayCustomSong().then(resolve);
+          this.playCurrentCandidate().then(resolve);
           return;
         }
+        // No more candidates, stay silent (NO annoying synth sound!)
         this.isCustomTrackActive = false;
         resolve(false);
       };
 
-      audio.addEventListener('error', handleFail);
+      audio.addEventListener('error', () => {
+        tryNextCandidate();
+      });
 
       audio.src = urlToTry;
 
@@ -196,121 +210,54 @@ class AmbientAudioEngine {
               resolved = true;
               this.audioElement = audio;
               this.isCustomTrackActive = true;
+              this.isPlaying = true;
+              this.pendingAutoplay = false;
               resolve(true);
             }
           })
-          .catch(() => {
-            // Autoplay prevented or file not reachable
-            handleFail();
+          .catch((err) => {
+            // Check if it's browser autoplay policy block (NotAllowedError)
+            if (err && err.name === 'NotAllowedError') {
+              // Not a 404! The file is ready, just waiting for user interaction
+              if (!resolved) {
+                resolved = true;
+                this.audioElement = audio;
+                this.pendingAutoplay = true;
+                // Will play automatically on first user click/touch/scroll
+                resolve(true);
+              }
+            } else {
+              tryNextCandidate();
+            }
           });
       } else {
         this.audioElement = audio;
         this.isCustomTrackActive = true;
+        this.isPlaying = true;
         resolve(true);
       }
     });
   }
 
-  private async startSynth(): Promise<boolean> {
-    this.initSynth();
-    if (!this.ctx || !this.masterGain) return false;
-
-    try {
-      if (this.ctx.state === 'suspended') {
-        await this.ctx.resume();
-      }
-    } catch {
-      // Browser blocked until gesture
-      return false;
-    }
-
-    this.isPlaying = true;
-    this.isCustomTrackActive = false;
-    this.masterGain.gain.cancelScheduledValues(this.ctx.currentTime);
-    this.masterGain.gain.setValueAtTime(0.001, this.ctx.currentTime);
-    this.masterGain.gain.linearRampToValueAtTime(0.22, this.ctx.currentTime + 3);
-
-    this.scheduleNextChord();
-    return true;
-  }
-
   public async resume(): Promise<boolean> {
-    if (this.isCustomTrackActive && this.audioElement) {
+    this.isMutedByUser = false;
+    if (this.audioElement) {
       try {
         await this.audioElement.play();
         this.isPlaying = true;
+        this.pendingAutoplay = false;
         return true;
       } catch {
-        // Fallback below
+        return this.start();
       }
     }
-
-    if (!this.isPlaying) {
-      return this.start();
-    }
-
-    if (this.ctx) {
-      try {
-        if (this.ctx.state === 'suspended') {
-          await this.ctx.resume();
-        }
-        return true;
-      } catch {
-        return false;
-      }
-    }
-
-    return true;
+    return this.start();
   }
-
-  private playTone(freq: number, startTime: number, duration: number, volume: number) {
-    if (!this.ctx || !this.filterNode) return;
-
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
-
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(freq, startTime);
-    const detune = (Math.random() - 0.5) * 6;
-    osc.detune.setValueAtTime(detune, startTime);
-
-    gain.gain.setValueAtTime(0.0001, startTime);
-    const attack = 2.5;
-    gain.gain.linearRampToValueAtTime(volume, startTime + attack);
-    gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
-
-    osc.connect(gain);
-    gain.connect(this.filterNode);
-
-    osc.start(startTime);
-    osc.stop(startTime + duration + 0.1);
-  }
-
-  private scheduleNextChord = () => {
-    if (!this.isPlaying || !this.ctx) return;
-
-    const now = this.ctx.currentTime;
-    const chord = this.chords[this.chordIndex % this.chords.length];
-    this.chordIndex++;
-
-    const chordDuration = 9.0;
-
-    chord.forEach((freq, idx) => {
-      const noteDelay = idx * 0.45;
-      const noteVol = 0.05 + 0.04 / (idx + 1);
-      this.playTone(freq, now + noteDelay, chordDuration + 2, noteVol);
-    });
-
-    if (Math.random() > 0.3) {
-      const bellFreq = chord[Math.floor(Math.random() * chord.length)] * 2;
-      this.playTone(bellFreq, now + 3.2, 5.0, 0.025);
-    }
-
-    this.timerId = window.setTimeout(this.scheduleNextChord, (chordDuration - 1.5) * 1000);
-  };
 
   public stop(): void {
     this.isPlaying = false;
+    this.isMutedByUser = true;
+    this.pendingAutoplay = false;
 
     if (this.audioElement) {
       try {
@@ -318,23 +265,6 @@ class AmbientAudioEngine {
       } catch {
         // ignore
       }
-    }
-
-    if (this.timerId !== null) {
-      clearTimeout(this.timerId);
-      this.timerId = null;
-    }
-
-    if (this.ctx && this.masterGain) {
-      const now = this.ctx.currentTime;
-      this.masterGain.gain.cancelScheduledValues(now);
-      this.masterGain.gain.linearRampToValueAtTime(0.0001, now + 1.5);
-
-      setTimeout(() => {
-        if (!this.isPlaying && this.ctx && this.ctx.state === 'running') {
-          this.ctx.suspend();
-        }
-      }, 1600);
     }
   }
 
