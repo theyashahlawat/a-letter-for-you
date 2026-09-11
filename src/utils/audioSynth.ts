@@ -1,129 +1,120 @@
 // Audio Engine - MP3 soundtrack player
-// Supports user-uploaded songs (persisted in IndexedDB) and default public/song.mp3.
-// Procedural synthesizer is completely removed - only real audio files are played.
+// Plays the real audio file from /public/song.mp3.
+// Audio starts only after a genuine user interaction.
 
-import { saveAudioToStorage, getAudioFromStorage, clearAudioFromStorage } from './audioStorage';
+import {
+  saveAudioToStorage,
+  getAudioFromStorage,
+  clearAudioFromStorage,
+} from './audioStorage';
 
-function getCandidatePaths(): string[] {
-  const metaEnv = (import.meta as unknown as { env?: { BASE_URL?: string } })?.env;
-  const base = metaEnv?.BASE_URL || '/';
-  const cleanBase = base.endsWith('/') ? base.slice(0, -1) : base;
-
-  const rawList = [
-    `${cleanBase}/song.mp3`,
-    '/song.mp3',
-    'song.mp3',
-    `${cleanBase}/music.mp3`,
-    '/music.mp3',
-    'music.mp3',
-  ];
-
-  // Return unique, non-empty candidates
-  return Array.from(new Set(rawList.filter(Boolean)));
+function getDefaultAudioPath(): string {
+  return '/song.mp3';
 }
 
 class AmbientAudioEngine {
   private audioElement: HTMLAudioElement | null = null;
+
   private isCustomTrackActive = false;
-  private songVolume = 0.70; // Fixed 70% volume so it never overpowers reading
-  private candidateIndex = 0;
-  private candidateFiles: string[] = [];
+  private songVolume = 0.70;
+
   private customSongUrl: string | null = null;
   private userUploadedBlob: string | null = null;
   private savedSongName: string | null = null;
+
   private isStorageChecked = false;
   private isPlaying = false;
   private isMutedByUser = false;
-  private pendingAutoplay = false;
 
   constructor() {
-    this.candidateFiles = getCandidatePaths();
-    if (this.candidateFiles.length > 0) {
-      this.customSongUrl = this.candidateFiles[0];
-    }
-    this.attachAutoplayUnlockListeners();
+    // Default public audio file
+    this.customSongUrl = getDefaultAudioPath();
+
+    // Load previously uploaded audio in the background.
+    // We intentionally do NOT try to autoplay here.
+    this.loadSavedAudioFromStorage().catch(() => {
+      // Ignore storage errors and continue with default song.
+    });
   }
 
-  private attachAutoplayUnlockListeners() {
-    if (typeof window === 'undefined') return;
-
-    const unlock = async () => {
-      if (this.isMutedByUser) return;
-      if (this.pendingAutoplay || !this.isPlaying) {
-        await this.start();
-      } else if (this.audioElement && this.audioElement.paused) {
-        try {
-          await this.audioElement.play();
-          this.isPlaying = true;
-          this.pendingAutoplay = false;
-        } catch {
-          // ignore
-        }
-      }
-    };
-
-    window.addEventListener('click', unlock, { passive: true, once: true });
-    window.addEventListener('touchstart', unlock, { passive: true, once: true });
-    window.addEventListener('pointerdown', unlock, { passive: true, once: true });
-    window.addEventListener('keydown', unlock, { passive: true, once: true });
-  }
-
+  /**
+   * Load previously uploaded audio from IndexedDB.
+   */
   public async loadSavedAudioFromStorage(): Promise<string | null> {
-    if (this.isStorageChecked && this.savedSongName) {
+    if (this.isStorageChecked) {
       return this.savedSongName;
     }
+
     try {
       const saved = await getAudioFromStorage();
+
       this.isStorageChecked = true;
-      if (saved && saved.blob) {
+
+      if (saved?.blob) {
         if (this.userUploadedBlob) {
           URL.revokeObjectURL(this.userUploadedBlob);
         }
+
         const blobUrl = URL.createObjectURL(saved.blob);
+
         this.userUploadedBlob = blobUrl;
         this.customSongUrl = blobUrl;
         this.savedSongName = saved.name;
+
         return saved.name;
       }
     } catch {
       this.isStorageChecked = true;
     }
+
     return null;
   }
 
+  /**
+   * Set a user-uploaded audio file.
+   */
   public async setCustomAudioFile(file: File): Promise<string> {
     this.isMutedByUser = false;
+
     if (this.userUploadedBlob) {
       URL.revokeObjectURL(this.userUploadedBlob);
     }
+
     const blobUrl = URL.createObjectURL(file);
+
     this.userUploadedBlob = blobUrl;
     this.customSongUrl = blobUrl;
     this.savedSongName = file.name;
-    this.candidateIndex = 0;
     this.isStorageChecked = true;
 
-    // Permanently persist in IndexedDB
     await saveAudioToStorage(file, file.name);
 
     this.stop();
+
+    // User selected the file, so this is a valid interaction.
     await this.start();
+
     return file.name;
   }
 
+  /**
+   * Reset to the default public/song.mp3.
+   */
   public async resetToDefault(): Promise<void> {
     this.isMutedByUser = false;
+
     if (this.userUploadedBlob) {
       URL.revokeObjectURL(this.userUploadedBlob);
       this.userUploadedBlob = null;
     }
+
     this.savedSongName = null;
-    this.candidateFiles = getCandidatePaths();
-    this.candidateIndex = 0;
-    this.customSongUrl = this.candidateFiles[0] || '/song.mp3';
+    this.customSongUrl = getDefaultAudioPath();
+    this.isStorageChecked = true;
+
     await clearAudioFromStorage();
+
     this.stop();
-    await this.start();
   }
 
   public getSavedSongName(): string | null {
@@ -136,6 +127,7 @@ class AmbientAudioEngine {
 
   public setVolume(volume: number): void {
     this.songVolume = Math.max(0, Math.min(1, volume));
+
     if (this.audioElement) {
       this.audioElement.volume = this.songVolume;
     }
@@ -145,125 +137,97 @@ class AmbientAudioEngine {
     return this.songVolume;
   }
 
+  /**
+   * Start music.
+   *
+   * IMPORTANT:
+   * This method should be called directly from a user interaction,
+   * such as clicking "Open the letter".
+   */
   public async start(): Promise<boolean> {
-    if (this.isMutedByUser) return false;
-
-    // Check IndexedDB if not checked yet
-    if (!this.isStorageChecked) {
-      await this.loadSavedAudioFromStorage();
+    if (this.isMutedByUser) {
+      return false;
     }
 
-    const success = await this.playCurrentCandidate();
-    if (success) {
-      this.isPlaying = true;
-      this.isCustomTrackActive = true;
-      this.pendingAutoplay = false;
-      return true;
-    }
+    const url = this.customSongUrl || getDefaultAudioPath();
 
-    return false;
+    return this.playAudio(url);
   }
 
-  private playCurrentCandidate(): Promise<boolean> {
-    return new Promise((resolve) => {
-      const urlToTry = this.customSongUrl || this.candidateFiles[this.candidateIndex] || '/song.mp3';
-
-      if (this.audioElement) {
+  /**
+   * Actually create and play the audio element.
+   */
+  private async playAudio(url: string): Promise<boolean> {
+    // Stop previous audio element
+    if (this.audioElement) {
+      try {
         this.audioElement.pause();
-        this.audioElement.src = '';
-        this.audioElement = null;
+        this.audioElement.currentTime = 0;
+      } catch {
+        // Ignore cleanup errors
       }
+    }
 
-      const audio = new Audio();
-      audio.preload = 'auto';
-      audio.loop = true;
-      audio.volume = this.songVolume;
+    const audio = new Audio();
 
-      let resolved = false;
+    audio.src = url;
+    audio.preload = 'auto';
+    audio.loop = true;
+    audio.volume = this.songVolume;
 
-      const tryNextCandidate = () => {
-        if (resolved) return;
-        resolved = true;
-        // If it was a default file that 404ed, try next path candidate
-        if (!this.userUploadedBlob && this.candidateIndex < this.candidateFiles.length - 1) {
-          this.candidateIndex++;
-          this.customSongUrl = this.candidateFiles[this.candidateIndex];
-          this.playCurrentCandidate().then(resolve);
-          return;
-        }
-        // No more candidates, stay silent (NO annoying synth sound!)
-        this.isCustomTrackActive = false;
-        resolve(false);
-      };
+    this.audioElement = audio;
 
-      audio.addEventListener('error', () => {
-        tryNextCandidate();
-      });
+    try {
+      await audio.play();
 
-      audio.src = urlToTry;
+      this.isPlaying = true;
+      this.isCustomTrackActive = !!this.userUploadedBlob;
 
-      const playPromise = audio.play();
-      if (playPromise !== undefined) {
-        playPromise
-          .then(() => {
-            if (!resolved) {
-              resolved = true;
-              this.audioElement = audio;
-              this.isCustomTrackActive = true;
-              this.isPlaying = true;
-              this.pendingAutoplay = false;
-              resolve(true);
-            }
-          })
-          .catch((err) => {
-            // Check if it's browser autoplay policy block (NotAllowedError)
-            if (err && err.name === 'NotAllowedError') {
-              // Not a 404! The file is ready, just waiting for user interaction
-              if (!resolved) {
-                resolved = true;
-                this.audioElement = audio;
-                this.pendingAutoplay = true;
-                // Will play automatically on first user click/touch/scroll
-                resolve(true);
-              }
-            } else {
-              tryNextCandidate();
-            }
-          });
-      } else {
-        this.audioElement = audio;
-        this.isCustomTrackActive = true;
-        this.isPlaying = true;
-        resolve(true);
-      }
-    });
+      return true;
+    } catch (error) {
+      console.warn('Audio could not start:', error);
+
+      this.isPlaying = false;
+
+      // Don't throw. The UI can continue without music.
+      return false;
+    }
   }
 
+  /**
+   * Resume paused music.
+   */
   public async resume(): Promise<boolean> {
     this.isMutedByUser = false;
+
     if (this.audioElement) {
       try {
         await this.audioElement.play();
+
         this.isPlaying = true;
-        this.pendingAutoplay = false;
+
         return true;
       } catch {
-        return this.start();
+        return false;
       }
     }
+
     return this.start();
   }
 
+  /**
+   * Stop and mute the music.
+   */
   public stop(): void {
     this.isPlaying = false;
     this.isMutedByUser = true;
-    this.pendingAutoplay = false;
 
     if (this.audioElement) {
       try {
         this.audioElement.pause();
+        this.audioElement.currentTime = 0;
       } catch {
-        // ignore
+        // Ignore cleanup errors
       }
     }
   }
