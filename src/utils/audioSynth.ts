@@ -1,6 +1,7 @@
 // Audio Engine - MP3 soundtrack player
-// Plays the real audio file from /public/song.mp3.
-// Audio starts only after a genuine user interaction.
+// Plays the default /public/song.mp3 file.
+// Custom uploaded songs are supported through IndexedDB.
+// Playback is started through a genuine user interaction.
 
 import {
   saveAudioToStorage,
@@ -8,9 +9,7 @@ import {
   clearAudioFromStorage,
 } from './audioStorage';
 
-function getDefaultAudioPath(): string {
-  return '/song.mp3';
-}
+const DEFAULT_AUDIO_PATH = '/song.mp3';
 
 class AmbientAudioEngine {
   private audioElement: HTMLAudioElement | null = null;
@@ -18,7 +17,8 @@ class AmbientAudioEngine {
   private isCustomTrackActive = false;
   private songVolume = 0.70;
 
-  private customSongUrl: string | null = null;
+  private customSongUrl: string = DEFAULT_AUDIO_PATH;
+
   private userUploadedBlob: string | null = null;
   private savedSongName: string | null = null;
 
@@ -27,18 +27,22 @@ class AmbientAudioEngine {
   private isMutedByUser = false;
 
   constructor() {
-    // Default public audio file
-    this.customSongUrl = getDefaultAudioPath();
+    // Always start with the default public song.
+    this.customSongUrl = DEFAULT_AUDIO_PATH;
 
-    // Load previously uploaded audio in the background.
-    // We intentionally do NOT try to autoplay here.
+    // Load saved custom audio in the background.
+    // IMPORTANT:
+    // We do NOT start playback here.
     this.loadSavedAudioFromStorage().catch(() => {
-      // Ignore storage errors and continue with default song.
+      // Ignore IndexedDB errors and keep using the default song.
     });
   }
 
   /**
-   * Load previously uploaded audio from IndexedDB.
+   * Load a previously uploaded custom song from IndexedDB.
+   *
+   * This method only loads the file.
+   * It NEVER starts playback automatically.
    */
   public async loadSavedAudioFromStorage(): Promise<string | null> {
     if (this.isStorageChecked) {
@@ -60,6 +64,7 @@ class AmbientAudioEngine {
         this.userUploadedBlob = blobUrl;
         this.customSongUrl = blobUrl;
         this.savedSongName = saved.name;
+        this.isCustomTrackActive = true;
 
         return saved.name;
       }
@@ -71,7 +76,7 @@ class AmbientAudioEngine {
   }
 
   /**
-   * Set a user-uploaded audio file.
+   * Set a custom uploaded audio file.
    */
   public async setCustomAudioFile(file: File): Promise<string> {
     this.isMutedByUser = false;
@@ -85,20 +90,21 @@ class AmbientAudioEngine {
     this.userUploadedBlob = blobUrl;
     this.customSongUrl = blobUrl;
     this.savedSongName = file.name;
+    this.isCustomTrackActive = true;
     this.isStorageChecked = true;
 
     await saveAudioToStorage(file, file.name);
 
     this.stop();
 
-    // User selected the file, so this is a valid interaction.
+    // The file selection itself is a genuine user interaction.
     await this.start();
 
     return file.name;
   }
 
   /**
-   * Reset to the default public/song.mp3.
+   * Reset back to the default /public/song.mp3.
    */
   public async resetToDefault(): Promise<void> {
     this.isMutedByUser = false;
@@ -109,12 +115,16 @@ class AmbientAudioEngine {
     }
 
     this.savedSongName = null;
-    this.customSongUrl = getDefaultAudioPath();
+    this.customSongUrl = DEFAULT_AUDIO_PATH;
+    this.isCustomTrackActive = false;
     this.isStorageChecked = true;
 
     await clearAudioFromStorage();
 
     this.stop();
+
+    // Reset mute state so the next user interaction can start music.
+    this.isMutedByUser = false;
   }
 
   public getSavedSongName(): string | null {
@@ -125,6 +135,9 @@ class AmbientAudioEngine {
     return this.isCustomTrackActive;
   }
 
+  /**
+   * Set volume between 0 and 1.
+   */
   public setVolume(volume: number): void {
     this.songVolume = Math.max(0, Math.min(1, volume));
 
@@ -141,30 +154,34 @@ class AmbientAudioEngine {
    * Start music.
    *
    * IMPORTANT:
-   * This method should be called directly from a user interaction,
-   * such as clicking "Open the letter".
+   * There is NO IndexedDB await before audio.play().
+   *
+   * This method should be called directly from a user gesture,
+   * for example:
+   *
+   * Open the letter button -> audioEngine.start()
    */
   public async start(): Promise<boolean> {
     if (this.isMutedByUser) {
       return false;
     }
 
-    const url = this.customSongUrl || getDefaultAudioPath();
+    const audioUrl = this.customSongUrl || DEFAULT_AUDIO_PATH;
 
-    return this.playAudio(url);
+    return this.playAudio(audioUrl);
   }
 
   /**
-   * Actually create and play the audio element.
+   * Create the audio element and immediately request playback.
    */
   private async playAudio(url: string): Promise<boolean> {
-    // Stop previous audio element
+    // Clean up previous audio element.
     if (this.audioElement) {
       try {
         this.audioElement.pause();
         this.audioElement.currentTime = 0;
       } catch {
-        // Ignore cleanup errors
+        // Ignore cleanup errors.
       }
     }
 
@@ -178,18 +195,18 @@ class AmbientAudioEngine {
     this.audioElement = audio;
 
     try {
+      // IMPORTANT:
+      // Keep this play() call directly inside start().
       await audio.play();
 
       this.isPlaying = true;
-      this.isCustomTrackActive = !!this.userUploadedBlob;
 
       return true;
     } catch (error) {
-      console.warn('Audio could not start:', error);
+      console.warn('Audio playback was blocked or failed:', error);
 
       this.isPlaying = false;
 
-      // Don't throw. The UI can continue without music.
       return false;
     }
   }
@@ -200,23 +217,27 @@ class AmbientAudioEngine {
   public async resume(): Promise<boolean> {
     this.isMutedByUser = false;
 
-    if (this.audioElement) {
-      try {
-        await this.audioElement.play();
-
-        this.isPlaying = true;
-
-        return true;
-      } catch {
-        return false;
-      }
+    if (!this.audioElement) {
+      return this.start();
     }
 
-    return this.start();
+    try {
+      await this.audioElement.play();
+
+      this.isPlaying = true;
+
+      return true;
+    } catch (error) {
+      console.warn('Audio resume failed:', error);
+
+      this.isPlaying = false;
+
+      return false;
+    }
   }
 
   /**
-   * Stop and mute the music.
+   * Stop / mute music.
    */
   public stop(): void {
     this.isPlaying = false;
@@ -227,7 +248,7 @@ class AmbientAudioEngine {
         this.audioElement.pause();
         this.audioElement.currentTime = 0;
       } catch {
-        // Ignore cleanup errors
+        // Ignore cleanup errors.
       }
     }
   }
