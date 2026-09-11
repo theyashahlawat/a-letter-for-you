@@ -1,13 +1,28 @@
 import React from 'react';
 import { motion } from 'motion/react';
 import { ChevronDown } from 'lucide-react';
+import { audioEngine } from '../utils/audioSynth';
 
 interface HeroSectionProps {
   onOpenLetter: () => void;
   isOpen: boolean;
 }
 
-export const HeroSection: React.FC<HeroSectionProps> = ({ onOpenLetter, isOpen }) => {
+export const HeroSection: React.FC<HeroSectionProps> = ({
+  onOpenLetter,
+  isOpen,
+}) => {
+  const handleOpenLetter = () => {
+    // Start music directly from the user's click.
+    // This is more reliable on mobile browsers and Brave
+    // because the audio play request happens inside a
+    // genuine user interaction.
+    void audioEngine.start();
+
+    // Continue with the existing letter-opening animation.
+    onOpenLetter();
+  };
+
   return (
     <section
       id="hero-opening-screen"
@@ -15,13 +30,14 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ onOpenLetter, isOpen }
     >
       {/* Cinematic Ambient Atmosphere & Lighting */}
       <div className="pointer-events-none absolute inset-0 bg-radial from-[#2d0d1e]/45 via-[#160611]/80 to-[#0c0409] -z-10" />
-      
+
       {/* Soft Vignette Overlay */}
       <div className="pointer-events-none absolute inset-0 bg-radial from-transparent via-black/20 to-black/70 -z-10" />
-      
+
       {/* Gentle Warm Halo in Center */}
       <div className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-[420px] w-[420px] sm:h-[580px] sm:w-[580px] rounded-full bg-[#d7b578]/5 blur-[120px] -z-10" />
-      <div className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-[320px] w-[320px] rounded-full bg-[#c98893]/8 blur-[90px] -z-10" />
+
+      <div className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-[320px] w-[320px] sm:h-[440px] sm:w-[440px] rounded-full bg-[#c98893]/8 blur-[90px] -z-10" />
 
       {/* Decorative Top Flourish */}
       <motion.div
@@ -31,6 +47,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ onOpenLetter, isOpen }
         className="mb-8 flex items-center justify-center gap-3"
       >
         <span className="h-[1px] w-8 bg-gradient-to-r from-transparent to-[#d7b578]/40"></span>
+
         <svg
           className="h-3.5 w-3.5 text-[#d7b578]/60"
           viewBox="0 0 24 24"
@@ -38,8 +55,13 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ onOpenLetter, isOpen }
           stroke="currentColor"
           strokeWidth="1.2"
         >
-          <path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z" fill="currentColor" fillOpacity="0.25" />
+          <path
+            d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z"
+            fill="currentColor"
+            fillOpacity="0.25"
+          />
         </svg>
+
         <span className="h-[1px] w-8 bg-gradient-to-l from-transparent to-[#d7b578]/40"></span>
       </motion.div>
 
@@ -47,7 +69,11 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ onOpenLetter, isOpen }
       <motion.p
         initial={{ opacity: 0, y: 15 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 1.6, delay: 0.2, ease: [0.16, 1, 0.3, 1] }}
+        transition={{
+          duration: 1.6,
+          delay: 0.2,
+          ease: [0.16, 1, 0.3, 1],
+        }}
         className="font-sans text-xs sm:text-sm font-normal tracking-[0.2em] sm:tracking-[0.24em] text-[#d9a8a8] mb-6"
       >
         Some feelings are better written than left unsaid…
@@ -57,7 +83,11 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ onOpenLetter, isOpen }
       <motion.h1
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 2.0, delay: 0.5, ease: [0.16, 1, 0.3, 1] }}
+        transition={{
+          duration: 2.0,
+          delay: 0.5,
+          ease: [0.16, 1, 0.3, 1],
+        }}
         className="font-serif text-3xl sm:text-5xl md:text-6xl font-light tracking-tight text-[#f9efe4] max-w-3xl leading-[1.25] sm:leading-[1.2] mb-6"
       >
         A letter I never found the courage to give you.
@@ -67,7 +97,11 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ onOpenLetter, isOpen }
       <motion.p
         initial={{ opacity: 0 }}
         animate={{ opacity: 0.85 }}
-        transition={{ duration: 1.8, delay: 0.9, ease: 'easeOut' }}
+        transition={{
+          duration: 1.8,
+          delay: 0.9,
+          ease: 'easeOut',
+        }}
         className="font-sans text-sm sm:text-base font-light text-[#cbb69d] tracking-wide mb-12 max-w-xl mx-auto"
       >
         No expectations. Just something I wanted you to know.
@@ -77,7 +111,11 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ onOpenLetter, isOpen }
       <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
-        transition={{ duration: 1.5, delay: 1.2, ease: [0.16, 1, 0.3, 1] }}
+        transition={{
+          duration: 1.5,
+          delay: 1.2,
+          ease: [0.16, 1, 0.3, 1],
+        }}
         className="relative group"
       >
         {/* Soft Gold Glow behind Button */}
@@ -85,11 +123,15 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ onOpenLetter, isOpen }
 
         <button
           id="open-letter-button"
-          onClick={onOpenLetter}
+          onClick={handleOpenLetter}
           className="relative flex items-center justify-center gap-3 rounded-full border border-[#e8d5b5]/40 bg-[#1e0a16]/85 px-8 py-3.5 text-sm sm:text-base font-serif tracking-wider text-[#f5ebd9] shadow-xl backdrop-blur-md transition-all duration-500 hover:border-[#e8d5b5]/80 hover:bg-[#2e0e22] hover:text-white cursor-pointer active:scale-[0.98]"
         >
           <span>Open the letter</span>
-          <span className="text-[#e297a3] transition-transform duration-500 group-hover:scale-125 text-base" aria-hidden="true">
+
+          <span
+            className="text-[#e297a3] transition-transform duration-500 group-hover:scale-125 text-base"
+            aria-hidden="true"
+          >
             ♡
           </span>
         </button>
@@ -100,7 +142,11 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ onOpenLetter, isOpen }
         <motion.div
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 0.7, y: 0 }}
-          transition={{ duration: 1, repeat: Infinity, repeatType: 'reverse' }}
+          transition={{
+            duration: 1,
+            repeat: Infinity,
+            repeatType: 'reverse',
+          }}
           className="absolute bottom-8 flex flex-col items-center gap-1.5 text-xs font-sans tracking-widest text-[#d5c3ba]/60 cursor-pointer"
           onClick={onOpenLetter}
         >
